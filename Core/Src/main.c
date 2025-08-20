@@ -18,12 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "CANMessages.h"
-#include <string.h>
-#include <stdio.h>
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include <string.h>
+#include "CANMessages.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,11 +55,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN_Init(void);
-
 /* USER CODE BEGIN PFP */
 /* The below code allows user to setup scanf and printf functions inside via
  * serial console, read the entire documentation below for more details:
- * Forum Link: https://forum.digikey.com/t/easily-use-scanf-on-stm32/21103
+ * FORUM LINK BELOW: https://forum.digikey.com/t/easily-use-scanf-on-stm32/21103
  * */
 #ifdef __GNUC__
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
@@ -88,6 +87,10 @@ GETCHAR_PROTOTYPE
   HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
   return ch;
 }
+
+void floatToUpperBytes(float val, uint8_t* byteArr);
+void floatToLowerBytes(float val, uint8_t* byteArr);
+void sendCANMessage(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -150,41 +153,38 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_CAN_Init();
-  setvbuf(stdin, NULL, _IONBF, 0); // for scanf and printf
-
   /* USER CODE BEGIN 2 */
   HAL_CAN_Start(&hcan);
+  setvbuf(stdin, NULL, _IONBF, 0); // for scanf setup, avoiding errors in syscalls.c
 
-  // I want to send over the CANPacket as an input, rather than hardcoded value,
-  // Node ID can stay the same (only one device), however, SET_INPUT have to be different supporting different modes
-  // DLC should change, I'm unsure about CAN_RTR_DATA though, since there are 2 frames: data frame and remote frame
-  // have to solve the problem of unable entering in velocity and position mode via CAN, currently I can only set the
-  // mode first in GUI, then flash the firmware for the float values.
-  // I have to keep on pressing the user input button to setup the interrupt for my commands below
-  // Although it "works", but it is fall from ideal for sure
-  //
-
-  // sending over the CANPacket
-  TxHeader.StdId = (NODE_ID << 5) | SET_INPUT_VEL; // 0x00D = setInputVelocity, node_id = 0
-  TxHeader.IDE = CAN_ID_STD;
-  TxHeader.RTR = CAN_RTR_DATA;
-  TxHeader.DLC = 8;
-
-  floatToUpperBytes(2.0f, TxData); // velocity bytes for now due to SET_INPUT_VEL mode
+  int cmd_id;
+  int dlc;
+  float value;
   /* USER CODE END 2 */
-  	// only once
-	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
-	  // handle error…
-	}
-	HAL_Delay(100);
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+    while (1)
+    {
+		if (scanf("%x %d %f", &cmd_id, &dlc, &value) == 3)
+		{
+			printf("packet sent: CMD:0x%x, DLC:%d, VAL: %f \r\n", cmd_id, dlc, value);
+			memset(TxData, 0, sizeof(TxData));
+
+			TxHeader.StdId = (NODE_ID << 5) | cmd_id;
+			TxHeader.IDE = CAN_ID_STD;
+			TxHeader.RTR = CAN_RTR_DATA;
+			TxHeader.DLC = dlc;
+
+			// Put value as bytes directly into TxData
+			// example usage: "0x0D 8 2.0" VELOCITY_MODE with DLC = 8 and spinning at INPUT_VEL 2 rev/s.
+			floatToUpperBytes(value, TxData);
+			HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+		}
+    }
     /* USER CODE END WHILE */
 
-	/* USER CODE BEGIN 3 */
-  }
+    /* USER CODE BEGIN 3 */
   /* USER CODE END 3 */
 }
 
@@ -280,7 +280,7 @@ static void MX_USART2_UART_Init(void)
 
   /* USER CODE END USART2_Init 1 */
   huart2.Instance = USART2;
-  huart2.Init.BaudRate = 38400;
+  huart2.Init.BaudRate = 115200;
   huart2.Init.WordLength = UART_WORDLENGTH_8B;
   huart2.Init.StopBits = UART_STOPBITS_1;
   huart2.Init.Parity = UART_PARITY_NONE;
