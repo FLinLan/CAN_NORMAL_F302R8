@@ -20,6 +20,7 @@
 #include "main.h"
 #include "CANMessages.h"
 #include <string.h>
+#include <stdio.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -37,7 +38,7 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-#define NODE_ID 0x00
+#define NODE_ID 0x00 // CAN node id for Odrive (might change if multiple devices connected)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -54,8 +55,39 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_CAN_Init(void);
-/* USER CODE BEGIN PFP */
 
+/* USER CODE BEGIN PFP */
+/* The below code allows user to setup scanf and printf functions inside via
+ * serial console, read the entire documentation below for more details:
+ * Forum Link: https://forum.digikey.com/t/easily-use-scanf-on-stm32/21103
+ * */
+#ifdef __GNUC__
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+#define GETCHAR_PROTOTYPE int __io_getchar(void)
+#else
+#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
+#define GETCHAR_PROTOTYPE int fgetc(FILE *f)
+#endif
+
+PUTCHAR_PROTOTYPE
+{
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+  return ch;
+}
+
+GETCHAR_PROTOTYPE
+{
+  uint8_t ch = 0;
+
+  /* Clear the Overrun flag just before receiving the first character */
+  __HAL_UART_CLEAR_OREFLAG(&huart2);
+
+  /* Wait for reception of a character on the USART RX line and echo this
+   * character on console */
+  HAL_UART_Receive(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+  HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+  return ch;
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -118,8 +150,19 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_CAN_Init();
+  setvbuf(stdin, NULL, _IONBF, 0); // for scanf and printf
+
   /* USER CODE BEGIN 2 */
   HAL_CAN_Start(&hcan);
+
+  // I want to send over the CANPacket as an input, rather than hardcoded value,
+  // Node ID can stay the same (only one device), however, SET_INPUT have to be different supporting different modes
+  // DLC should change, I'm unsure about CAN_RTR_DATA though, since there are 2 frames: data frame and remote frame
+  // have to solve the problem of unable entering in velocity and position mode via CAN, currently I can only set the
+  // mode first in GUI, then flash the firmware for the float values.
+  // I have to keep on pressing the user input button to setup the interrupt for my commands below
+  // Although it "works", but it is fall from ideal for sure
+  //
 
   // sending over the CANPacket
   TxHeader.StdId = (NODE_ID << 5) | SET_INPUT_VEL; // 0x00D = setInputVelocity, node_id = 0
@@ -127,19 +170,20 @@ int main(void)
   TxHeader.RTR = CAN_RTR_DATA;
   TxHeader.DLC = 8;
 
-  floatToUpperBytes(0.0f, TxData); // velocity bytes
+  floatToUpperBytes(2.0f, TxData); // velocity bytes for now due to SET_INPUT_VEL mode
   /* USER CODE END 2 */
-
+  	// only once
+	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
+	  // handle error…
+	}
+	HAL_Delay(100);
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
     /* USER CODE END WHILE */
-	if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
-	  // handle error…
-	}
-	HAL_Delay(10);
-    /* USER CODE BEGIN 3 */
+
+	/* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
