@@ -43,11 +43,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
-
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+uint8_t enable_can_rx = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -90,7 +89,6 @@ GETCHAR_PROTOTYPE
 
 void floatToUpperBytes(float val, uint8_t* byteArr);
 void floatToLowerBytes(float val, uint8_t* byteArr);
-void sendCANMessage(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -119,6 +117,17 @@ void floatToLowerBytes(float val, uint8_t* byteArr) {
   } u;
   u.var = val;
   memcpy(byteArr + 4, u.buf, sizeof(float)); // Write to bytes 4–7
+}
+
+void HAL_CAN_RxFifoMsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &RxHeader, RxData);
+
+    static uint32_t msg_count = 0;
+    msg_count++;
+    if (msg_count % 10 == 0) {  // Print every 10th message
+        printf("CAN RX - ID: 0x%03lX, DLC: %lu\r\n", RxHeader.StdId, RxHeader.DLC);
+    }
 }
 /* USER CODE END 0 */
 
@@ -155,7 +164,28 @@ int main(void)
   MX_CAN_Init();
   /* USER CODE BEGIN 2 */
   HAL_CAN_Start(&hcan);
+
   setvbuf(stdin, NULL, _IONBF, 0); // for scanf setup, avoiding errors in syscalls.c
+
+  // CAN filter configuration
+  CAN_FilterTypeDef canFilter;
+  canFilter.FilterBank = 0;
+  canFilter.FilterMode = CAN_FILTERMODE_IDMASK;
+  canFilter.FilterFIFOAssignment = CAN_RX_FIFO0;
+  canFilter.FilterIdHigh = 0x0000;
+  canFilter.FilterIdLow = 0x0000;
+  canFilter.FilterMaskIdHigh = 0x0000;
+  canFilter.FilterMaskIdLow = 0x0000;
+  canFilter.FilterScale = CAN_FILTERSCALE_32BIT;
+  canFilter.FilterActivation = ENABLE;
+  HAL_CAN_ConfigFilter(&hcan, &canFilter);
+
+  // Set CAN interrupt to lower priority BEFORE enabling it
+  HAL_NVIC_SetPriority(USB_HP_CAN_TX_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(USB_LP_CAN_RX0_IRQn, 5, 0);
+
+  // Enable RX interrupt
+  //  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
 
   int cmd_id;
   int dlc;
@@ -166,6 +196,19 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1)
     {
+        // Check for CAN messages without interrupt
+		//        if (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) > 0)
+		//        {
+		//            HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &RxHeader, RxData);
+		//
+		//            // Only print every 50th message to reduce spam
+		//            static uint32_t msg_count = 0;
+		//            msg_count++;
+		//            if (msg_count % 10 == 0) {
+		//                printf("CAN RX - ID: 0x%03lX, DLC: %lu (count: %lu)\r\n", RxHeader.StdId, RxHeader.DLC, msg_count);
+		//            }
+		//        }
+
 		if (scanf("%x %d %f", &cmd_id, &dlc, &value) == 3)
 		{
 			printf("packet sent: CMD:0x%x, DLC:%d, VAL: %f \r\n", cmd_id, dlc, value);
@@ -180,6 +223,7 @@ int main(void)
 			// example usage: "0x0D 8 2.0" VELOCITY_MODE with DLC = 8 and spinning at INPUT_VEL 2 rev/s.
 			floatToUpperBytes(value, TxData);
 			HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox);
+
 		}
     }
     /* USER CODE END WHILE */
